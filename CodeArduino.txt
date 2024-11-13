@@ -1,0 +1,83 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include "MAX30105.h"
+#include "heartRate.h"
+
+// Inicializa o display LCD I2C (endereço 0x27 e tamanho 16x2)
+LiquidCrystal_I2C lcd(0x27, 16, 2); 
+
+MAX30105 particleSensor;
+
+const byte RATE_SIZE = 4; //Aumente para mais médias. 4 é bom.
+byte rates[RATE_SIZE]; //Array de batimentos
+byte rateSpot = 0;
+long lastBeat = 0; //Hora do último batimento
+
+float beatsPerMinute;
+int beatAvg;
+
+void setup()
+{
+  Serial.begin(115200);
+  Serial.println("Initializing...");
+
+  // Inicializa o sensor MAX30105
+  if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) { //Usando o barramento I2C padrão, velocidade de 400kHz
+    Serial.println("MAX30105 não foi encontrado. Verifique a fiação/poder.");
+    while (1);
+  }
+  Serial.println("Coloque o dedo no sensor com pressão constante.");
+
+  particleSensor.setup(); //Configura o sensor com as configurações padrão
+  particleSensor.setPulseAmplitudeRed(0x0A); //LED Vermelho em baixa intensidade
+  particleSensor.setPulseAmplitudeGreen(0); //Desliga o LED Verde
+  
+  // Inicializa o display LCD
+  lcd.begin(16, 2);         // Inicializa o LCD com 16 colunas e 2 linhas
+  lcd.setBacklight(1);      // Liga a luz de fundo do LCD
+  lcd.print("Iniciando..."); // Mensagem de início
+  delay(2000);              // Aguarda 2 segundos
+  lcd.clear();              // Limpa o display
+}
+
+void loop()
+{
+  long irValue = particleSensor.getIR();
+
+  if (checkForBeat(irValue) == true) {
+    // Detectamos um batimento!
+    long delta = millis() - lastBeat;
+    lastBeat = millis();
+
+    beatsPerMinute = 60 / (delta / 1000.0);
+
+    if (beatsPerMinute < 255 && beatsPerMinute > 20) {
+      rates[rateSpot++] = (byte)beatsPerMinute; //Armazena o valor no array
+      rateSpot %= RATE_SIZE; //Zera a variável quando chega ao limite
+
+      // Calcula a média dos batimentos
+      beatAvg = 0;
+      for (byte x = 0; x < RATE_SIZE; x++)
+        beatAvg += rates[x];
+      beatAvg /= RATE_SIZE;
+    }
+  }
+
+  // Exibe os valores no display LCD
+  lcd.clear();
+  lcd.setCursor(0, 0); // Coloca o cursor na primeira linha
+  lcd.print("BPM: ");
+  lcd.print(beatsPerMinute, 1); // Exibe o BPM atual com uma casa decimal
+  
+  lcd.setCursor(0, 1); // Coloca o cursor na segunda linha
+  lcd.print("Avg: ");
+  lcd.print(beatAvg); // Exibe a média do BPM
+
+  // Caso o valor IR seja muito baixo, isso pode indicar que o dedo não está no sensor
+  if (irValue < 50000) {
+    lcd.setCursor(0, 1); // Coloca o cursor na segunda linha
+    lcd.print("Sem dedo!");
+  }
+
+  delay(500); // Aguarda meio segundo antes de atualizar o display
+}
